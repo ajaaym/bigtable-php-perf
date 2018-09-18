@@ -1,0 +1,188 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Copyright 2017 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+namespace Google\Cloud\Bigtable\Performance;
+
+use Google\Cloud\Bigtable\Performance\LoadData;
+use Google\Cloud\Bigtable\Performance\TableManager;
+
+$foundAutoloader = false;
+$autoloaderCandidates = [
+    '/../vendor/autoload.php',     // Git clone of google-cloud-php-core
+    '/../../vendor/autoload.php',  // Git clone of google-cloud-php
+    '/../../../autoload.php',      // google/cloud-core installation
+    '/../../../../autoload.php',   // google/cloud installation
+];
+foreach ($autoloaderCandidates as $candidate) {
+    if (file_exists(__DIR__ . $candidate)) {
+        $autoloader = require_once __DIR__ . $candidate;
+        $foundAutoloader = true;
+        break;
+    }
+}
+
+if (!$foundAutoloader) {
+    die('No autoloader found');
+}
+$threads =1;
+$jsonFile = null;
+foreach ($argv as $val) {
+	if (strpos($val, 'help') !== false) {
+		$txt = "--projectId\t projectId \n\n--instanceId\t instanceId \n\n--tableId\t table name to perform operations \n\n--totalRows\t Total no. of rows to inserting \t totalRows >= batchSize \n\n--batchSize\t Defines that how many rows mutate at a time \t batchSize is > 0 and <10000 \n\n--timeoutMinute\t random read write rows load till defined timeoutMinute \n\n--timeoutMillis\t timeoutMillis for mutate rows \n\nEx. totalRows=10000 batchsize=1000 timeoutMinute=30 timeoutMillis=60000 \nNote. timeoutMillis are optional \n\n";
+		exit($txt);
+	} else if (strpos($val, 'projectId') !== false) {
+		$val = explode('=', $val);
+		if (count($val) > 1) {
+			$projectId = $val[1];
+		}
+	} else if (strpos($val, 'instanceId') !== false) {
+		$val = explode('=', $val);
+		if (count($val) > 1) {
+			$instanceId = $val[1];
+		}
+	} else if (strpos($val, 'tableId') !== false) {
+		$val = explode('=', $val);
+		if (count($val) > 1) {
+			$tableId = $val[1];
+		}
+	} else if (strpos($val, 'totalRows') !== false) {
+		$val = explode('=', $val);
+		if (count($val) > 1 && is_int((int) $val[1])) {
+			$totalRows = (int) $val[1];
+		} else {
+			exit("totalRows is integer and >= batchSize\n");
+		}
+	} else if (strpos($val, 'batchSize') !== false) {
+		$val = explode('=', $val);
+		if (count($val) > 1 && is_int((int) $val[1])) {
+			$batchSize = (int) $val[1];
+		} else {
+			exit("batchSize is integer and > 0\n");
+		}
+	} else if (strpos($val, 'timeoutMillis') !== false) {
+		$val = explode('=', $val);
+		if (count($val) > 1 && is_int((int) $val[1])) {
+			$timeoutMillis = (int) $val[1];
+		}
+	} else if (strpos($val, 'timeoutMinute') !== false) {
+		$val = explode('=', $val);
+		if (count($val) >= 1 && is_int((int) $val[1])) {
+			$minute = (int) $val[1];
+		} else {
+			exit("minute is integer and >= 1\n");
+		}
+	} else if (strpos($val, 'threads') !== false) {
+		$val = explode('=', $val);
+		if (count($val) >= 1 && is_int((int) $val[1])) {
+			$threads = (int) $val[1];
+		} else {
+			exit("threads is integer and >= 1\n");
+		}
+	} else if (strpos($val, 'jsonfile') !== false) {
+		$val = explode('=', $val);
+		if (count($val) >= 1) {
+			$jsonFile = $val[1];
+		}
+	}
+}
+if (!isset($projectId)) {
+	exit("projectId is missing\n");
+}
+if (!isset($instanceId)) {
+	exit("instanceId is missing\n");
+}
+if (!isset($tableId)) {
+	exit("tableId is missing\n");
+}
+if (!isset($totalRows)) {
+	exit("totalRows is missing\n");
+}
+if (!isset($batchSize)) {
+	exit("batchSize is missing\n");
+}
+if (!isset($minute)) {
+	exit("timeoutMinute is missing\n");
+}
+
+$rowKeyPrefix  = 'perf';
+$columnFamily = 'cf';
+$length = 9;
+$tablePrefix = "php_latency_";
+$tableId = $tablePrefix.substr(str_shuffle(str_repeat($x = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', ceil($length/strlen($x)))), 1, $length);
+echo "creating table ".$tableId. "\n";
+$tableManager = new TableManager($projectId, $instanceId, $jsonFile, $tablePrefix);
+$tableManager->createTable($tableId, $columnFamily);
+echo "created table ".$tableId. "\n";
+
+echo $totalRows." rows loading... \n";
+$timeoutsec      = $minute*60;//sec
+
+$loadDataThreads = [];
+$loadHdr = hdr_init(1, 3600000, 3);
+$splitRange = $totalRows/$threads;
+$processStartTime = round(microtime(true)*1000);
+for ($i=0; $i<$threads; $i++) {
+	$start = $i*$splitRange;
+	$end = $start + $splitRange;
+	$loadDataThreads[] = new LoadData($projectId, $instanceId, $tableId, $rowKeyPrefix, $columnFamily, $batchSize, $start, $end, $jsonFile, $autoloader);
+}
+
+for ($i=0; $i<$threads; $i++) {
+	$loadDataThreads[$i]->start();
+}
+
+for ($i=0; $i<$threads; $i++) {
+	$loadDataThreads[$i]->join();
+}
+$timeElapsedSeconds= round(microtime(true)*1000)  - $processStartTime;
+$success = 0;
+$failure = 0;
+for ($i=0; $i<$threads; $i++) {
+	$loadHdr = hdr_add($loadHdr, $loadDataThreads[$i]->getHdr());
+	$success += $loadDataThreads[$i]->getSuccess();
+	$failure += $loadDataThreads[$i]->getFailure();
+}
+$total = $success + $failure;
+$totalSec      = $timeElapsedSeconds / 1000;
+$throughput    = round($total/$totalSec, 4);
+$min           = hdr_min($loadHdr);
+$max           = hdr_max($loadHdr);
+$loadStats = [
+		'operation_name'     => 'Data Load',
+		'run_time'           => $timeElapsedSeconds,
+		'mix_latency'        => $max/100,
+		'min_latency'        => $min/100,
+		'oprations'          => $total,
+		'throughput'         => $throughput,
+		'p50_latency'        => hdr_value_at_percentile($loadHdr, 50),
+		'p75_latency'        => hdr_value_at_percentile($loadHdr, 75),
+		'p90_latency'        => hdr_value_at_percentile($loadHdr, 90),
+		'p95_latency'        => hdr_value_at_percentile($loadHdr, 95),
+		'p99_latency'        => hdr_value_at_percentile($loadHdr, 99),
+		'p99.99_latency'     => hdr_value_at_percentile($loadHdr, 99.99),
+		'success_operations' => $success,
+		'failed_operations'  => $failure
+];
+echo "done loading data\n";
+$header = ['Operation Name', 'Run Time', 'Max Latency', 'Min Latency', 'Operations', 'Throughput', 'p50 Latency', 'p75 Latency', 'p90 Latency', 'p95 Latency', 'p99 Latency', 'p99.99 Latency', 'Success Operations', 'Failed Operations'];
+echo implode(', ', $header)."\n";
+echo implode(', ', $loadStats)."\n";
+echo "deleting table ".$tableId . "\n";
+$tableManager->deleteTable($tableId);
+echo "deleted table ".$tableId. "\n";
+

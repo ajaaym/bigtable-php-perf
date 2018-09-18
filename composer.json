@@ -1,0 +1,28 @@
+{
+    "name": "bigtable/php-perf",
+    "description": "Package for performance test of php",
+    "type": "project",
+    "authors": [
+        {
+            "name": "Ajay",
+            "email": "ajay@qlogic.io"
+        }
+    ],
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/ajaaym/google-cloud-php"
+        }      
+    ],
+    "require": {
+        "google/cloud": "dev-bigtable-data"
+    },
+    "autoload": {
+        "psr-4": {
+            "Google\\Cloud\\Bigtable\\Performance\\": "src"
+        }
+    },
+    "bin": [
+        "bin/run"
+    ]
+}
