@@ -77,13 +77,13 @@ class LoadData extends Thread
         $interations = $totalRows/$this->batchSize;
         $hdr = hdr_init(1, 3600000, 3);
         $processStartTime = round(microtime(true)*1000);
-        $numberOfRows=0;
-        for ($k = 0; $k < $interations; $k++) {
+        $numberOfRows=$this->start;
+        for ($k = 0; $k < $interations && $numberOfRows < $this->end; $k++) {
             $j = 0; 
             $rowMutations = [];
-            for (;$j < $this->batchSize && $numberOfRows < $totalRows; $j++) {
+            for (;$j < $this->batchSize && $numberOfRows < $this->end; $j++) {
                 for ($j = 0; $j < $this->batchSize; $j++) {
-                    $rowKey        = sprintf($this->rowKeyPrefix.'%07d', $index);
+                    $rowKey        = sprintf($this->rowKeyPrefix.'%07d', $numberOfRows);
                     $rowMutation = new RowMutation($rowKey);
                     for ($i = 0; $i < 10; $i++) {
                         $value = $this->randomValues[mt_rand(1, $this->randomTotal)];
@@ -96,7 +96,7 @@ class LoadData extends Thread
             }
             try {
                 $dataClient->mutateRows($rowMutations);
-                $this->success+= $j;
+                $this->success+= $j-1;
             } catch (BigtableDataOperationException $gdoe) {
                 $this->failure+= count($dgoe->getMetadata());
             }
@@ -105,7 +105,7 @@ class LoadData extends Thread
         }
         $timeElapsedSeconds= round(microtime(true)*1000)  - $processStartTime;
         $this->hdrData = serialize(hdr_export($hdr));
-        echo "done data load from $this->start to $this->end totalRows $totalRows totalTime $timeElapsedSeconds (milli sec)\n";
+        echo "done data load from $this->start to $this->end totalRows $totalRows  success $this->success failure $this->failure totalTime $timeElapsedSeconds (milli sec)\n";
     }
 
     public function getHdrData()
