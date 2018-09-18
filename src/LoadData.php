@@ -18,6 +18,7 @@
 namespace Google\Cloud\Bigtable\Performance;
 
 use Google\Cloud\Bigtable\DataClient;
+use Google\Cloud\Bigtable\Exception\BigtableDataOperationException;
 use Google\Cloud\Bigtable\RowMutation;
 
 use \Thread;
@@ -32,19 +33,19 @@ class LoadData extends Thread
     private $batchSize;
     private $start;
     private $end;
-    private $hdr;
+    private $hdrData;
     private $success = 0;
     private $failure = 0;
     private $projectId;
     private $instanceId;
     private $tableId;
     private $options;
-    private $loader;
+    private $autoLoaderPath;
     private $keyFilePath;
 
-    public function __construct($projectId, $instanceId, $tableId, $rowKeyPrefix, $columnFamily, $batchSize, $start, $end, $keyFilePath, $loader)
+    public function __construct($projectId, $instanceId, $tableId, $rowKeyPrefix, $columnFamily, $batchSize, $start, $end, $keyFilePath, $autoLoaderPath)
     {
-        $this->loader = $loader;
+        $this->autoLoaderPath = $autoLoaderPath;
         $this->options = [
             'projectId' => $projectId,
             'credentials' => $keyFilePath
@@ -66,20 +67,21 @@ class LoadData extends Thread
 
     public function run()
     {
-        $this->loader->register();
+        require_once $this->autoLoaderPath;
         $dataClient = new DataClient($this->instanceId, $this->tableId, [
             'projectId' => $this->projectId,
             'credentials' => $this->keyFilePath
         ]);
-        echo "starting data load from ".$this->start." to ".$this->end."\n";
         $totalRows = $this->end - $this->start;
+        echo "starting data load from $this->start to $this->end totalRows $totalRows \n";
         $interations = $totalRows/$this->batchSize;
-        $this->hdr = hdr_init(1, 3600000, 3);
+        $hdr = hdr_init(1, 3600000, 3);
         $processStartTime = round(microtime(true)*1000);
         $numberOfRows=0;
-        $rowMutations = [];
         for ($k = 0; $k < $interations; $k++) {
-            for ($j = 0; $j < $this->batchSize && $numberOfRows < $totalRows; $j++) {
+            $j = 0; 
+            $rowMutations = [];
+            for (;$j < $this->batchSize && $numberOfRows < $totalRows; $j++) {
                 for ($j = 0; $j < $this->batchSize; $j++) {
                     $rowKey        = sprintf($this->rowKeyPrefix.'%07d', $index);
                     $rowMutation = new RowMutation($rowKey);
@@ -90,33 +92,25 @@ class LoadData extends Thread
                     $rowMutations[] = $rowMutation;
                     $numberOfRows++;
                 }
-                echo "number of rows inserting: ".$numberOfRows."\n";
                 $startTime    = round(microtime(true)*1000);
-                $serverStream = $dataClient->mutateRows($rowMutations);
-                foreach ($serverStream->readAll() as $current) {
-                    $entries = $current->getEntries();
-                    foreach ($entries->getIterator() as $Iterator) {
-                        $status = $Iterator->getStatus();
-                        $code   = $status->getCode();
-                        if ($code == 0) {
-                            $this->success++;
-                        } else if ($code == 1) {
-                            $this->failure++;
-                        }
-                    }
-                }
-                $endTime = round(microtime(true)*1000)-$startTime;
-                hdr_record_value($hdr, $endTime);
             }
+            try {
+                $dataClient->mutateRows($rowMutations);
+                $this->success+= $j;
+            } catch (BigtableDataOperationException $gdoe) {
+                $this->failure+= count($dgoe->getMetadata());
+            }
+            $endTime = round(microtime(true)*1000)-$startTime;
+            hdr_record_value($hdr, $endTime);
         }
         $timeElapsedSeconds= round(microtime(true)*1000)  - $processStartTime;
-        echo "starting data load from ".$this->start." to ".$this->end."\n";
-		echo "\nTotal time takes for loading rows is $time_elapsed_secs (milli sec) totalrow $totalRows";
+        $this->hdrData = serialize(hdr_export($hdr));
+        echo "done data load from $this->start to $this->end totalRows $totalRows totalTime $timeElapsedSeconds (milli sec)\n";
     }
 
-    public function getHdr()
+    public function getHdrData()
     {
-        return $this->hdr;
+        return unserialize($this->hdrData);
     }
 
     public function getSuccess() {

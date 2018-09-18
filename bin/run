@@ -22,6 +22,7 @@ use Google\Cloud\Bigtable\Performance\LoadData;
 use Google\Cloud\Bigtable\Performance\TableManager;
 
 $foundAutoloader = false;
+$autoLoaderPath = null;
 $autoloaderCandidates = [
     '/../vendor/autoload.php',     // Git clone of google-cloud-php-core
     '/../../vendor/autoload.php',  // Git clone of google-cloud-php
@@ -30,6 +31,8 @@ $autoloaderCandidates = [
 ];
 foreach ($autoloaderCandidates as $candidate) {
     if (file_exists(__DIR__ . $candidate)) {
+		$autoLoaderPath = realPath(__DIR__ . $candidate);
+		echo "Autoloader full path: $autoLoaderPath \n";
         $autoloader = require_once __DIR__ . $candidate;
         $foundAutoloader = true;
         break;
@@ -39,7 +42,7 @@ foreach ($autoloaderCandidates as $candidate) {
 if (!$foundAutoloader) {
     die('No autoloader found');
 }
-$threads =1;
+$threads =2;
 $jsonFile = null;
 foreach ($argv as $val) {
 	if (strpos($val, 'help') !== false) {
@@ -133,30 +136,34 @@ echo $totalRows." rows loading... \n";
 $timeoutsec      = $minute*60;//sec
 
 $loadDataThreads = [];
-$loadHdr = hdr_init(1, 3600000, 3);
+
 $splitRange = $totalRows/$threads;
 $processStartTime = round(microtime(true)*1000);
 for ($i=0; $i<$threads; $i++) {
 	$start = $i*$splitRange;
 	$end = $start + $splitRange;
-	$loadDataThreads[] = new LoadData($projectId, $instanceId, $tableId, $rowKeyPrefix, $columnFamily, $batchSize, $start, $end, $jsonFile, $autoloader);
+	$loadDataThreads[] = new LoadData($projectId, $instanceId, $tableId, $rowKeyPrefix, $columnFamily, $batchSize, $start, $end, $jsonFile, $autoLoaderPath);
 }
 
 for ($i=0; $i<$threads; $i++) {
-	$loadDataThreads[$i]->start();
+	$loadDataThreads[$i]->start(PTHREADS_INHERIT_NONE);
 }
 
 for ($i=0; $i<$threads; $i++) {
 	$loadDataThreads[$i]->join();
 }
 $timeElapsedSeconds= round(microtime(true)*1000)  - $processStartTime;
+echo "total time elapsed for loading data $timeElapsedSeconds (millis)\n";
 $success = 0;
 $failure = 0;
+$loadHdr = hdr_init(1, 3600000, 3);
 for ($i=0; $i<$threads; $i++) {
-	$loadHdr = hdr_add($loadHdr, $loadDataThreads[$i]->getHdr());
+	$hdrData = $loadDataThreads[$i]->getHdrData();
+	$return = hdr_merge_into($loadHdr, hdr_import($hdrData));
 	$success += $loadDataThreads[$i]->getSuccess();
 	$failure += $loadDataThreads[$i]->getFailure();
 }
+echo " success $success failure $failure \n";
 $total = $success + $failure;
 $totalSec      = $timeElapsedSeconds / 1000;
 $throughput    = round($total/$totalSec, 4);
