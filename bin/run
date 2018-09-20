@@ -162,7 +162,6 @@ for ($i=0; $i<$threads; $i++) {
 	$return = hdr_merge_into($loadHdr, hdr_import($hdrData));
 	$success += $loadDataThreads[$i]->getSuccess();
 	$failure += $loadDataThreads[$i]->getFailure();
-	echo " success $success failure $failure \n";
 }
 echo " success $success failure $failure \n";
 $total = $success + $failure;
